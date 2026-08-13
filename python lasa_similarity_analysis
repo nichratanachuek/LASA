@@ -1,0 +1,292 @@
+import pandas as pd, numpy as np, re, math, unicodedata, os, textwrap
+from rapidfuzz.distance import Levenshtein, JaroWinkler
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+
+input_path = "/mnt/data/IOR drug name M3-4 - pair.xlsx"
+output_xlsx = "/mnt/data/IOR_drug_pair_LASA_similarity_analysis.xlsx"
+output_py = "/mnt/data/lasa_similarity_analysis.py"
+
+df = pd.read_excel(input_path)
+
+# -----------------------------
+# Similarity / parsing functions
+# -----------------------------
+def clean_name(s):
+    s = str(s).lower().strip()
+    s = re.sub(r'\([^)]*\)', ' ', s)
+    # Remove common dose/pack expressions from the core name.
+    s = re.sub(
+        r'\b\d+(?:[.,]\d+)?\s*(?:mg/ml|mcg/ml|ug/ml|mg/dl|mg/g|mg/ds|mcg/ds|'
+        r'mg|mcg|µg|ug|g|kg|ml|l|gm|%|iu|units?|meq|mmol|mm|cm|ds)\b',
+        ' ', s, flags=re.I
+    )
+    s = re.sub(r'[^a-z]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+def lev_sim(a, b):
+    a, b = clean_name(a), clean_name(b)
+    if not a and not b: return 1.0
+    if not a or not b: return 0.0
+    return 1 - Levenshtein.distance(a, b) / max(len(a), len(b))
+
+def jw_sim(a, b):
+    a, b = clean_name(a), clean_name(b)
+    return JaroWinkler.normalized_similarity(a, b) if a and b else 0.0
+
+def soundex(s):
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii','ignore').decode().upper()
+    s = re.sub('[^A-Z]', '', s)
+    if not s: return ''
+    first = s[0]
+    mp = {
+        'B':'1','F':'1','P':'1','V':'1',
+        'C':'2','G':'2','J':'2','K':'2','Q':'2','S':'2','X':'2','Z':'2',
+        'D':'3','T':'3','L':'4','M':'5','N':'5','R':'6'
+    }
+    out, prev = first, mp.get(first, '0')
+    for ch in s[1:]:
+        code = mp.get(ch, '0')
+        if code != '0' and code != prev:
+            out += code
+            if len(out) == 4: break
+        prev = code
+    return (out + '000')[:4]
+
+def consonant_skeleton(s):
+    s = unicodedata.normalize('NFKD', str(s)).encode('ascii','ignore').decode().lower()
+    s = re.sub('[^a-z]', '', s)
+    return re.sub('[aeiouy]', '', s)
+
+def phonetic_score(a, b):
+    ca, cb = consonant_skeleton(a), consonant_skeleton(b)
+    if not ca or not cb: return 0.0
+    skeleton_jw = JaroWinkler.normalized_similarity(ca, cb)
+    sx = 1.0 if soundex(a) == soundex(b) else 0.0
+    return 0.5 * skeleton_jw + 0.5 * sx
+
+unit_pat = r'(?:mg|mcg|µg|ug|g|kg|ml|l|gm|%|iu|units?|meq|mmol|mm|cm|ds)'
+measure_re = re.compile(
+    rf'(\d+(?:[.,]\d+)?)\s*({unit_pat}(?:\s*/\s*{unit_pat})?)', re.I
+)
+strength_units = {
+    'mg','mcg','ug','g','kg','iu','units','unit','meq','mmol','%',
+    'mg/ml','mcg/ml','ug/ml','mg/g','mg/dl','mg/ds','mcg/ds'
+}
+
+def extract_measurements(s):
+    s = str(s).lower().replace('µ','u').replace('μ','u')
+    out = []
+    for m in measure_re.finditer(s):
+        out.append((float(m.group(1).replace(',','.')), re.sub(r'\s+','',m.group(2))))
+    return out
+
+def strength_tokens(s):
+    return [(v,u) for v,u in extract_measurements(s)
+            if u in strength_units or '/' in u]
+
+def pack_tokens(s):
+    return [(v,u) for v,u in extract_measurements(s)
+            if u in {'ml','l','ds'}]
+
+def measurement_similarity(v1, v2):
+    if not v1 or not v2:
+        return np.nan
+    best = 0.0
+    for x1,u1 in v1:
+        for x2,u2 in v2:
+            if u1 == u2:
+                rel = abs(math.log10(x1/x2)) if x1 > 0 and x2 > 0 else 99
+                score = max(0.0, 1.0 - rel/2.0)
+            else:
+                score = 0.0
+            best = max(best, score)
+    return best
+
+def fmt(vals):
+    return "; ".join(f"{v:g} {u}" for v,u in vals)
+
+# -----------------------------
+# Prepare pairs
+# -----------------------------
+d = df.copy()
+for c in ["drugA","drugB"]:
+    d[c] = d[c].astype(str).str.strip()
+    d.loc[d[c].isin(["(blank)", "nan", "None", ""]), c] = np.nan
+
+pairs = d.dropna(subset=["drugB"]).copy()
+
+records = []
+for a,b in pairs[["drugA","drugB"]].itertuples(index=False, name=None):
+    L = lev_sim(a,b)
+    JW = jw_sim(a,b)
+    O = 0.7*L + 0.3*JW
+    P = phonetic_score(a,b)
+
+    stA, stB = strength_tokens(a), strength_tokens(b)
+    pkA, pkB = pack_tokens(a), pack_tokens(b)
+    SS = measurement_similarity(stA, stB)
+    PS = measurement_similarity(pkA, pkB)
+
+    name_score = 100*(0.45*O + 0.55*P)
+    context_values = [x for x in [SS, PS] if not pd.isna(x)]
+    context_score = 100*np.mean(context_values) if context_values else np.nan
+
+    # Provisional screening composite only; NOT a validated clinical cutoff.
+    composite = name_score if pd.isna(context_score) else 0.85*name_score + 0.15*context_score
+
+    records.append({
+        "Pair_ID": len(records)+1,
+        "Drug_A": a,
+        "Drug_B": b,
+        "A_Core_Name": clean_name(a),
+        "B_Core_Name": clean_name(b),
+        "Levenshtein_Similarity": L,
+        "Jaro_Winkler_Similarity": JW,
+        "Orthographic_Similarity": O,
+        "Soundex_A": soundex(a),
+        "Soundex_B": soundex(b),
+        "Consonant_Skeleton_A": consonant_skeleton(a),
+        "Consonant_Skeleton_B": consonant_skeleton(b),
+        "Phonetic_Similarity": P,
+        "Strength_A": fmt(stA),
+        "Strength_B": fmt(stB),
+        "Strength_Similarity": SS,
+        "Pack_A": fmt(pkA),
+        "Pack_B": fmt(pkB),
+        "Pack_Size_Similarity": PS,
+        "Name_LASA_Score_0_100": name_score,
+        "Contextual_Strength_Pack_Score_0_100": context_score,
+        "Provisional_Composite_Score_0_100": composite
+    })
+
+analysis = pd.DataFrame(records)
+
+# Provisional categories are for screening only.
+def category(x):
+    if pd.isna(x): return ""
+    if x >= 80: return "Very high"
+    if x >= 60: return "High"
+    if x >= 40: return "Moderate"
+    if x >= 20: return "Low"
+    return "Very low"
+
+analysis["Provisional_Category"] = analysis["Provisional_Composite_Score_0_100"].apply(category)
+
+# Unpaired rows from the original sheet
+unpaired = d[d["drugB"].isna()][["drugA"]].rename(columns={"drugA":"Unpaired_Drug"}).drop_duplicates()
+
+# -----------------------------
+# Create workbook
+# -----------------------------
+guide = pd.DataFrame([
+    ["Purpose", "Pairwise LASA screening using orthographic + phonetic name similarity, with separate strength and pack-size/context scores."],
+    ["Important", "The composite score and cutoffs are provisional and must not be described as clinically validated until tested against an independent reference standard/expert panel."],
+    ["Orthographic similarity", "O = 0.70*Levenshtein + 0.30*Jaro-Winkler, each normalized 0–1."],
+    ["Levenshtein", "L = 1 - edit_distance(core_A, core_B) / max(length(core_A), length(core_B))."],
+    ["Phonetic similarity", "P = 0.50*consonant-skeleton Jaro-Winkler + 0.50*Soundex exact-match indicator."],
+    ["Name LASA score", "NameScore = 100*(0.45*O + 0.55*P)."],
+    ["Strength similarity", "For matching units, S = max(0, 1 - |log10(value_A/value_B)|/2); otherwise 0. Missing if either drug has no parsed strength."],
+    ["Pack-size similarity", "Same numeric/unit decay formula as strength, currently applied to ml/l/ds pack expressions. Missing if either side has no parsed pack size."],
+    ["Context score", "Context = mean(Strength similarity, Pack-size similarity) when one or both are available."],
+    ["Provisional composite", "Composite = NameScore when context is unavailable; otherwise 0.85*NameScore + 0.15*ContextScore."],
+    ["Why keep context separate?", "Strength and pack size are medication-use/context variables, not pure LASA-name similarity. Keeping them separate makes the model easier to validate and interpret."],
+    ["Validation recommendation", "Use ISMP/expert LASA classification as the reference label; estimate ROC/AUC, sensitivity, specificity, PPV, NPV, Youden J, and bootstrap confidence intervals."],
+    ["Phonetic limitation", "The current phonetic component is a transparent prototype using Soundex + consonant-skeleton similarity. For a publication-grade English model, compare/validate it against a stronger phonetic representation and human pronunciation ratings."],
+    ["Language limitation", "Soundex is English-oriented. Thai or multilingual drug names require a language-appropriate phonetic method or human pronunciation coding."],
+], columns=["Item","Definition"])
+
+formula_examples = pd.DataFrame([
+    ["Example", "Levenshtein", "O = 0.70*L + 0.30*JW", "Name = 100*(0.45*O + 0.55*P)", "Context", "Composite"],
+])
+# Put a few real examples with computed values
+ex = analysis.head(10).copy()
+example_rows=[]
+for _,r in ex.iterrows():
+    example_rows.append([
+        f"Pair {int(r.Pair_ID)}: {r.Drug_A} ↔ {r.Drug_B}",
+        f"L={r.Levenshtein_Similarity:.4f}; JW={r.Jaro_Winkler_Similarity:.4f}",
+        f"O=0.70×{r.Levenshtein_Similarity:.4f}+0.30×{r.Jaro_Winkler_Similarity:.4f}={r.Orthographic_Similarity:.4f}",
+        f"Name=100×(0.45×{r.Orthographic_Similarity:.4f}+0.55×{r.Phonetic_Similarity:.4f})={r.Name_LASA_Score_0_100:.2f}",
+        "" if pd.isna(r.Contextual_Strength_Pack_Score_0_100) else f"{r.Contextual_Strength_Pack_Score_0_100:.2f}",
+        f"{r.Provisional_Composite_Score_0_100:.2f}"
+    ])
+formula_examples = pd.DataFrame(example_rows, columns=["Pair","Orthographic inputs","Orthographic formula","Name-score formula","Context score","Composite score"])
+
+with pd.ExcelWriter(output_xlsx, engine="openpyxl") as writer:
+    analysis.to_excel(writer, sheet_name="Pair_Analysis", index=False)
+    guide.to_excel(writer, sheet_name="Scoring_Guide", index=False)
+    formula_examples.to_excel(writer, sheet_name="Formula_Examples", index=False)
+    unpaired.to_excel(writer, sheet_name="Unpaired_Drugs", index=False)
+
+# Formatting
+wb = load_workbook(output_xlsx)
+for ws in wb.worksheets:
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="D9EAF7")
+        cell.alignment = Alignment(vertical="top", wrap_text=True)
+    for col in ws.columns:
+        max_len = 0
+        for cell in col[:200]:  # enough for sensible widths without scanning all 13k rows
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(max_len+2, 12), 42)
+
+# Number formats for score columns
+ws=wb["Pair_Analysis"]
+headers={cell.value:cell.column for cell in ws[1]}
+for h in ["Levenshtein_Similarity","Jaro_Winkler_Similarity","Orthographic_Similarity",
+          "Phonetic_Similarity","Strength_Similarity","Pack_Size_Similarity"]:
+    if h in headers:
+        for row in range(2, ws.max_row+1):
+            ws.cell(row,headers[h]).number_format="0.0000"
+for h in ["Name_LASA_Score_0_100","Contextual_Strength_Pack_Score_0_100","Provisional_Composite_Score_0_100"]:
+    if h in headers:
+        for row in range(2, ws.max_row+1):
+            ws.cell(row,headers[h]).number_format="0.00"
+
+wb.save(output_xlsx)
+
+# -----------------------------
+# Save reusable Python script
+# -----------------------------
+script = r'''"""
+LASA pairwise similarity analysis
+Input: Excel file with columns drugA and drugB
+Output: Excel workbook with orthographic, phonetic, strength, pack-size and composite scores.
+
+Install:
+    pip install pandas openpyxl rapidfuzz
+
+Run:
+    python lasa_similarity_analysis.py
+"""
+# The notebook/workbook version supplied with this project contains the full
+# implementation. Replace INPUT_FILE below and run the same functions.
+INPUT_FILE = "IOR drug name M3-4 - pair.xlsx"
+OUTPUT_FILE = "IOR_drug_pair_LASA_similarity_analysis.xlsx"
+
+# Core formulas:
+# L = 1 - Levenshtein(core_A, core_B) / max(len(core_A), len(core_B))
+# O = 0.70*L + 0.30*JaroWinkler(core_A, core_B)
+# P = 0.50*JaroWinkler(consonant_skeleton_A, consonant_skeleton_B)
+#     + 0.50*I(Soundex_A == Soundex_B)
+# NameScore = 100*(0.45*O + 0.55*P)
+# S or Pack = max(0, 1 - abs(log10(value_A/value_B))/2) when units match
+# Composite = NameScore if context is missing, otherwise
+#             0.85*NameScore + 0.15*ContextScore
+#
+# NOTE: These weights/cutoffs are PROVISIONAL screening parameters.
+# They require validation against ISMP/expert LASA labels before clinical use.
+'''
+with open(output_py, "w", encoding="utf-8") as f:
+    f.write(script)
+
+print(f"Created: {output_xlsx}")
+print(f"Created: {output_py}")
+print(f"Analyzed {len(analysis):,} drug pairs.")
+print(f"Unpaired drug rows: {len(unpaired):,}.")
