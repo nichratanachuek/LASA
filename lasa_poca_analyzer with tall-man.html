@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Name-Safety Instrument — LASA / POCA Drug Name Comparator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-base:#12161A;
+    --bg-panel:#1B2127;
+    --bg-inset:#0C0F12;
+    --ink:#EDEAE2;
+    --ink-muted:#8B94A0;
+    --ink-faint:#5B6470;
+    --accent:#D68A2E;
+    --accent-dim:#8C5A1E;
+    --border:#2A313A;
+    --border-soft:#20262D;
+    --risk-low:#4C9B76;
+    --risk-low-bg:rgba(76,155,118,0.14);
+    --risk-medium:#D6A23E;
+    --risk-medium-bg:rgba(214,162,62,0.14);
+    --risk-high:#B85C4A;
+    --risk-high-bg:rgba(184,92,74,0.16);
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  *{ box-sizing:border-box; }
+
+  html{ color-scheme: dark; }
+
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1A2027 0%, var(--bg-base) 55%);
+    color:var(--ink);
+    font-family:var(--font-display);
+    -webkit-font-smoothing:antialiased;
+    padding: 48px 20px 80px;
+  }
+
+  .wrap{ max-width: 880px; margin: 0 auto; }
+
+  .eyebrow{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom: 14px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:7px; height:7px;
+    border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px rgba(214,138,46,0.18);
+  }
+
+  h1{
+    font-size: clamp(26px, 4vw, 38px);
+    line-height:1.15;
+    font-weight:600;
+    margin: 0 0 10px;
+    letter-spacing: -0.01em;
+  }
+
+  .lede{
+    color: var(--ink-muted);
+    font-size:15px;
+    line-height:1.6;
+    max-width: 58ch;
+    margin: 0 0 34px;
+  }
+
+  /* ---------- Input row ---------- */
+  .input-panel{
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    display:grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 14px;
+    align-items:end;
+  }
+  @media (max-width: 620px){
+    .input-panel{ grid-template-columns: 1fr; }
+    .swap-btn{ justify-self:center; transform: rotate(90deg); }
+  }
+
+  .field label{
+    display:block;
+    font-size:11px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color: var(--ink-faint);
+    margin-bottom:8px;
+  }
+  .field input{
+    width:100%;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .field input::placeholder{ color: var(--ink-faint); }
+  .field input:focus-visible{
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(214,138,46,0.22);
+  }
+
+  .swap-btn{
+    width:40px; height:40px;
+    border-radius:50%;
+    border:1px solid var(--border);
+    background: var(--bg-inset);
+    color: var(--ink-muted);
+    font-size:16px;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition: color .15s ease, border-color .15s ease, transform .2s ease;
+    margin-bottom: 1px;
+  }
+  .swap-btn:hover{ color:var(--accent); border-color: var(--accent-dim); }
+  .swap-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ---------- Presets ---------- */
+  .presets{
+    display:flex; flex-wrap:wrap; gap:8px;
+    margin-top:16px;
+  }
+  .preset-label{
+    font-size:11px; color:var(--ink-faint);
+    letter-spacing:.08em; text-transform:uppercase;
+    align-self:center; margin-right:2px;
+  }
+  .chip{
+    font-family: var(--font-mono);
+    font-size:12.5px;
+    color: var(--ink-muted);
+    background: transparent;
+    border:1px solid var(--border);
+    border-radius:999px;
+    padding: 6px 12px;
+    cursor:pointer;
+    transition: all .15s ease;
+  }
+  .chip:hover{ color:var(--ink); border-color:var(--accent-dim); background: rgba(214,138,46,0.08); }
+  .chip:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ---------- Empty state ---------- */
+  .empty-state{
+    margin-top: 40px;
+    padding: 40px 20px;
+    text-align:center;
+    color: var(--ink-faint);
+    font-size:14px;
+    border: 1px dashed var(--border);
+    border-radius: 14px;
+  }
+
+  /* ---------- Results ---------- */
+  #results{ display:none; margin-top: 36px; }
+  #results.active{ display:block; }
+
+  .section-label{
+    font-family: var(--font-mono);
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 12px;
+  }
+
+  /* ---------- Alignment ladder ---------- */
+  .ladder-panel{
+    background: var(--bg-inset);
+    border:1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 18px 18px;
+    overflow-x:auto;
+    margin-bottom: 30px;
+  }
+  .ladder{
+    display:inline-flex;
+    flex-direction:column;
+    gap:2px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    white-space:nowrap;
+  }
+  .ladder-row{ display:flex; }
+  .cell{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width: 22px;
+    height: 30px;
+    border-radius:4px;
+    margin-right:2px;
+    transition: background-color .2s ease;
+  }
+  .spine-row{ display:flex; height:16px; }
+  .spine-cell{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:22px;
+    height:16px;
+    margin-right:2px;
+    font-size:12px;
+    color: var(--ink-faint);
+  }
+  .cell.match{ background: var(--risk-low-bg); color: var(--risk-low); }
+  .cell.sub{ background: var(--risk-high-bg); color: var(--risk-high); }
+  .cell.gap{ background: transparent; color: var(--ink-faint); border: 1px dashed var(--border-soft); }
+  .spine-cell.match::after{ content:"│"; color: var(--risk-low); opacity:.7; }
+  .spine-cell.sub::after{ content:"×"; color: var(--risk-high); }
+  .spine-cell.gap::after{ content:""; }
+
+  .ladder-caption{
+    font-size:12px; color:var(--ink-faint); margin-top:14px;
+    display:flex; gap:18px; flex-wrap:wrap;
+  }
+  .ladder-caption span{ display:inline-flex; align-items:center; gap:6px; }
+  .swatch{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+  /* ---------- Tall-Man panel ---------- */
+  .tallman-panel{
+    background: var(--bg-panel);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding: 22px;
+    margin-bottom: 30px;
+  }
+  .tallman-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    padding: 12px 0;
+  }
+  .tallman-row + .tallman-row{ border-top: 1px solid var(--border-soft); }
+  .tallman-name{
+    font-family: var(--font-mono);
+    font-size: 20px;
+    letter-spacing: 0.01em;
+    word-break: break-word;
+  }
+  .tallman-name .cap{ color: var(--accent); font-weight:600; }
+  .copy-btn{
+    flex-shrink:0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color: var(--ink-muted);
+    background: transparent;
+    border:1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    cursor:pointer;
+    transition: all .15s ease;
+  }
+  .copy-btn:hover{ color:var(--ink); border-color:var(--accent-dim); }
+  .copy-btn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+  .copy-btn.copied{ color: var(--risk-low); border-color: var(--risk-low); }
+
+  .tallman-note{
+    font-size: 13px;
+    line-height:1.6;
+    color: var(--ink-muted);
+  }
+  .tallman-note strong{ color: var(--ink); }
+  .tallman-caveat{
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-soft);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height:1.6;
+  }
+
+  /* ---------- Gauges ---------- */
+  .gauge-row{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 30px;
+  }
+  @media (max-width:620px){ .gauge-row{ grid-template-columns: 1fr; } }
+
+  .gauge-card{
+    background: var(--bg-panel);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding: 22px;
+    display:flex;
+    align-items:center;
+    gap: 20px;
+  }
+  .gauge-svg{ flex-shrink:0; }
+  .gauge-num{
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight:600;
+  }
+  .gauge-body h3{
+    margin:0 0 4px;
+    font-size:13px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color: var(--ink-muted);
+    font-weight:500;
+  }
+  .band-chip{
+    display:inline-block;
+    margin-top:8px;
+    font-family: var(--font-mono);
+    font-size:11.5px;
+    letter-spacing:.06em;
+    padding: 3px 10px;
+    border-radius:999px;
+    text-transform:uppercase;
+  }
+  .band-low{ color:var(--risk-low); background:var(--risk-low-bg); }
+  .band-medium{ color:var(--risk-medium); background:var(--risk-medium-bg); }
+  .band-high{ color:var(--risk-high); background:var(--risk-high-bg); }
+
+  /* ---------- Ledger table ---------- */
+  .ledger{
+    background: var(--bg-panel);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding: 8px 22px;
+    margin-bottom: 30px;
+  }
+  .ledger-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-soft);
+    font-size:13.5px;
+  }
+  .ledger-row:last-child{ border-bottom:none; }
+  .ledger-row .k{ color: var(--ink-muted); }
+  .ledger-row .v{ font-family: var(--font-mono); color: var(--ink); font-size:13.5px; }
+
+  /* ---------- Footer ---------- */
+  footer{
+    margin-top: 46px;
+    padding-top: 22px;
+    border-top: 1px solid var(--border-soft);
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    line-height:1.7;
+  }
+  footer a{ color: var(--ink-muted); }
+  footer strong{ color: var(--ink-muted); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">Medication Name-Safety Instrument</div>
+  <h1>Compare two drug names for LASA risk</h1>
+  <p class="lede">Type two names to see how closely they align in spelling and sound — scored as a composite LASA index and an FDA POCA-style index, side by side.</p>
+
+  <div class="input-panel">
+    <div class="field">
+      <label for="drugA">Drug name A</label>
+      <input id="drugA" type="text" placeholder="e.g. hydroxyzine" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="swap-btn" id="swapBtn" title="Swap names" aria-label="Swap names">⇄</button>
+    <div class="field">
+      <label for="drugB">Drug name B</label>
+      <input id="drugB" type="text" placeholder="e.g. hydralazine" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
+
+  <div class="presets" id="presets">
+    <span class="preset-label">Try:</span>
+  </div>
+
+  <div class="empty-state" id="emptyState">Enter both names above to run the comparison.</div>
+
+  <div id="results" aria-live="polite">
+
+    <p class="section-label">Character alignment</p>
+    <div class="ladder-panel">
+      <div class="ladder" id="ladder"></div>
+      <div class="ladder-caption">
+        <span><span class="swatch" style="background:var(--risk-low)"></span> matched letter</span>
+        <span><span class="swatch" style="background:var(--risk-high)"></span> substitution</span>
+        <span><span class="swatch" style="background:var(--border-soft);border:1px dashed var(--border)"></span> gap / insertion</span>
+      </div>
+    </div>
+
+    <p class="section-label">Suggested tall-man lettering</p>
+    <div class="tallman-panel" id="tallmanPanel"></div>
+
+    <p class="section-label">Scores</p>
+    <div class="gauge-row">
+      <div class="gauge-card">
+        <svg class="gauge-svg" id="gaugeLasa" width="84" height="84" viewBox="0 0 84 84"></svg>
+        <div class="gauge-body">
+          <h3>LASA composite</h3>
+          <div class="gauge-num" id="lasaNum">—</div>
+          <span class="band-chip" id="lasaBand">—</span>
+        </div>
+      </div>
+      <div class="gauge-card">
+        <svg class="gauge-svg" id="gaugePoca" width="84" height="84" viewBox="0 0 84 84"></svg>
+        <div class="gauge-body">
+          <h3>POCA-style</h3>
+          <div class="gauge-num" id="pocaNum">—</div>
+          <span class="band-chip" id="pocaBand">—</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="section-label">Sub-metric ledger</p>
+    <div class="ledger" id="ledger"></div>
+
+  </div>
+
+  <footer>
+    <strong>Risk bands</strong> (LASA composite, 0–1 scale): High ≥ 0.75 · Medium 0.55–0.75 · Low &lt; 0.55.
+    "Highly similar" (POCA-style, 0–100 scale) follows FDA's published cutoff of ≥ 70.<br><br>
+    <strong>About the POCA-style score:</strong> this reimplements POCA's published methodology
+    (orthographic = mean of bigram similarity + normalized edit distance; phonetic = a Double Metaphone
+    code-match, standing in for POCA's more complex ALINE algorithm). It is not FDA's actual software —
+    the real tool is at <a href="https://poca-public.fda.gov" target="_blank" rel="noopener">poca-public.fda.gov</a>,
+    with source available only on request from FDA. Treat this as a triage aid, not a regulatory-grade result.
+  </footer>
+
+</div>
+
+<script>
+/* =========================================================
+   String similarity engine — ports the LASA / POCA-style
+   methodology used throughout this analysis to JavaScript.
+   ========================================================= */
+
+function levenshteinDistance(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  const n = a.length, m = b.length;
+  if (n === 0) return m;
+  if (m === 0) return n;
+  let prev = Array.from({length: m + 1}, (_, i) => i);
+  for (let i = 1; i <= n; i++) {
+    const curr = [i];
+    for (let j = 1; j <= m; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[m];
+}
+
+function levenshteinSimilarity(a, b) {
+  if (!a && !b) return 1;
+  const dist = levenshteinDistance(a, b);
+  return 1 - dist / Math.max(a.length, b.length);
+}
+
+function jaroSimilarity(a, b) {
+  a = a.toLowerCase(); b = b.toLowerCase();
+  if (a === b) return 1;
+  const lenA = a.length, lenB = b.length;
+  if (lenA === 0 || lenB === 0) return 0;
+  const matchDistance = Math.max(0, Math.floor(Math.max(lenA, lenB) / 2) - 1);
+  const aMatches = new Array(lenA).fill(false);
+  const bMatches = new Array(lenB).fill(false);
+  let matches = 0, transpositions = 0;
+
+  for (let i = 0; i < lenA; i++) {
+    const start = Math.max(0, i - matchDistance);
+    const end = Math.min(i + matchDistance + 1, lenB);
+    for (let j = start; j < end; j++) {
+      if (bMatches[j] || a[i] !== b[j]) continue;
+      aMatches[i] = true; bMatches[j] = true; matches++;
+      break;
+    }
+  }
+  if (matches === 0) return 0;
+
+  let k = 0;
+  for (let i = 0; i < lenA; i++) {
+    if (!aMatches[i]) continue;
+    while (!bMatches[k]) k++;
+    if (a[i] !== b[k]) transpositions++;
+    k++;
+  }
+  transpositions = Math.floor(transpositions / 2);
+
+  return (matches / lenA + matches / lenB + (matches - transpositions) / matches) / 3;
+}
+
+function jaroWinklerSimilarity(a, b, prefixWeight = 0.1) {
+  const jaro = jaroSimilarity(a, b);
+  const aLow = a.toLowerCase(), bLow = b.toLowerCase();
+  let prefixLen = 0;
+  for (let i = 0; i < Math.min(aLow.length, bLow.length, 4); i++) {
+    if (aLow[i] === bLow[i]) prefixLen++; else break;
+  }
+  return jaro + prefixLen * prefixWeight * (1 - jaro);
+}
+
+function getNgrams(s, n) {
+  s = s.toLowerCase();
+  if (s.length < n) return new Set([s]);
+  const out = new Set();
+  for (let i = 0; i <= s.length - n; i++) out.add(s.slice(i, i + n));
+  return out;
+}
+
+function diceCoefficient(a, b, n = 2) {
+  const setA = getNgrams(a, n), setB = getNgrams(b, n);
+  if (setA.size === 0 && setB.size === 0) return 1;
+  let intersection = 0;
+  setA.forEach(g => { if (setB.has(g)) intersection++; });
+  return (2 * intersection) / (setA.size + setB.size);
+}
+
+/* ---- Simplified Double Metaphone (primary code only) ---- */
+function doubleMetaphonePrimary(raw) {
+  const s0 = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (!s0) return '';
+  const vowels = new Set(['A','E','I','O','U']);
+  const s = s0 + '     ';
+  const len = s0.length;
+  let pos = 0;
+  const code = [];
+  const at = i => (i >= 0 && i < s.length) ? s[i] : '';
+
+  if (['GN','KN','PN','WR','PS'].includes(s0.slice(0,2))) pos = 1;
+  else if (s0[0] === 'X') { code.push('S'); pos = 1; }
+
+  while (pos < len && code.length < 8) {
+    const c = at(pos);
+    if (vowels.has(c)) {
+      if (pos === 0) code.push('A');
+      pos += 1; continue;
+    }
+    switch (c) {
+      case 'B': code.push('P'); pos += at(pos+1) === 'B' ? 2 : 1; break;
+      case 'C':
+        if (at(pos+1) === 'H') { code.push('X'); pos += 2; }
+        else if ('IEY'.includes(at(pos+1))) { code.push('S'); pos += 2; }
+        else { code.push('K'); pos += at(pos+1) === 'C' ? 2 : 1; }
+        break;
+      case 'D':
+        if (at(pos+1) === 'G' && 'IEY'.includes(at(pos+2))) { code.push('J'); pos += 3; }
+        else { code.push('T'); pos += at(pos+1) === 'D' ? 2 : 1; }
+        break;
+      case 'G':
+        if (at(pos+1) === 'H') { code.push('K'); pos += 2; }
+        else if ('IEY'.includes(at(pos+1))) { code.push('J'); pos += 2; }
+        else { code.push('K'); pos += at(pos+1) === 'G' ? 2 : 1; }
+        break;
+      case 'H':
+        if (vowels.has(at(pos-1)) && !vowels.has(at(pos+1))) pos += 1;
+        else { code.push('H'); pos += 1; }
+        break;
+      case 'P':
+        if (at(pos+1) === 'H') { code.push('F'); pos += 2; }
+        else { code.push('P'); pos += at(pos+1) === 'P' ? 2 : 1; }
+        break;
+      case 'Q': code.push('K'); pos += 1; break;
+      case 'S':
+        if (at(pos+1) === 'H') { code.push('X'); pos += 2; }
+        else if (['IO','IA'].includes(at(pos+1) + at(pos+2))) { code.push('X'); pos += 1; }
+        else { code.push('S'); pos += at(pos+1) === 'S' ? 2 : 1; }
+        break;
+      case 'T':
+        if (at(pos+1) === 'H') { code.push('0'); pos += 2; }
+        else { code.push('T'); pos += at(pos+1) === 'T' ? 2 : 1; }
+        break;
+      case 'V': code.push('F'); pos += at(pos+1) === 'V' ? 2 : 1; break;
+      case 'W':
+        if (vowels.has(at(pos+1))) code.push('W');
+        pos += 1; break;
+      case 'X': code.push('KS'); pos += 1; break;
+      case 'Y':
+        if (vowels.has(at(pos+1))) code.push('Y');
+        pos += 1; break;
+      case 'Z': code.push('S'); pos += at(pos+1) === 'Z' ? 2 : 1; break;
+      case 'J': code.push('J'); pos += 1; break;
+      default: pos += 1;
+      // NOTE: F, L, M, N, R fall through to default (unhandled/skipped).
+      // This mirrors the Python double_metaphone() used for every other
+      // deliverable in this analysis, so results stay consistent across
+      // this tool and the spreadsheets already produced — even though a
+      // textbook Double Metaphone would code these letters as themselves.
+    }
+  }
+  return code.join('').slice(0, 8);
+}
+
+function phoneticMatchScore(a, b) {
+  const pa = doubleMetaphonePrimary(a), pb = doubleMetaphonePrimary(b);
+  if (!pa && !pb) return 1;
+  if (pa === pb) return 1;
+  const dist = levenshteinDistance(pa, pb);
+  return 1 - dist / Math.max(pa.length, pb.length, 1);
+}
+
+function riskBand(score) {
+  if (score >= 0.75) return 'high';
+  if (score >= 0.55) return 'medium';
+  return 'low';
+}
+
+/* ---- Tall-Man lettering suggestion ---- */
+function lettersOnly(s) { return s.toLowerCase().replace(/[^a-z]/g, ''); }
+
+function sharedPrefixLen(a, b) {
+  const al = a.toLowerCase(), bl = b.toLowerCase();
+  let n = 0;
+  while (n < al.length && n < bl.length && al[n] === bl[n]) n++;
+  return n;
+}
+
+function buildTallMan(a, b) {
+  const aTrim = a.trim(), bTrim = b.trim();
+  if (aTrim.toLowerCase() === bTrim.toLowerCase()) {
+    return { mode: 'identical' };
+  }
+  if (lettersOnly(aTrim) === lettersOnly(bTrim)) {
+    return { mode: 'numeric-only' };
+  }
+
+  const aligned = alignPair(aTrim, bTrim);
+  let firstDiff = -1, lastDiff = -1;
+  aligned.forEach((seg, idx) => {
+    if (seg.type !== 'match') {
+      if (firstDiff === -1) firstDiff = idx;
+      lastDiff = idx;
+    }
+  });
+
+  let outA = '', outB = '', capsA = 0, capsB = 0;
+  aligned.forEach((seg, idx) => {
+    const inZone = idx >= firstDiff && idx <= lastDiff;
+    if (seg.ca) { outA += inZone ? seg.ca.toUpperCase() : seg.ca.toLowerCase(); if (inZone) capsA++; }
+    if (seg.cb) { outB += inZone ? seg.cb.toUpperCase() : seg.cb.toLowerCase(); if (inZone) capsB++; }
+  });
+
+  // Fallback: pure-insertion differences can leave one side with zero
+  // emphasis. If so, capitalize from the shared-prefix boundary onward.
+  const P = sharedPrefixLen(aTrim, bTrim);
+  if (capsA === 0 && aTrim.length > P) { outA = aTrim.slice(0,P).toLowerCase() + aTrim.slice(P).toUpperCase(); capsA = aTrim.length - P; }
+  if (capsB === 0 && bTrim.length > P) { outB = bTrim.slice(0,P).toLowerCase() + bTrim.slice(P).toUpperCase(); capsB = bTrim.length - P; }
+
+  // If most of either word would need capitalizing, there's too little
+  // shared visual anchor left for tall-man to meaningfully help.
+  const ratioA = capsA / Math.max(lettersOnly(aTrim).length, 1);
+  const ratioB = capsB / Math.max(lettersOnly(bTrim).length, 1);
+  if (ratioA > 0.75 || ratioB > 0.75) {
+    return { mode: 'too-dissimilar' };
+  }
+
+  return { mode: 'suggested', a: outA, b: outB };
+}
+
+function computeAll(a, b) {
+  const lev = levenshteinSimilarity(a, b);
+  const jw = jaroWinklerSimilarity(a, b);
+  const bigram = diceCoefficient(a, b, 2);
+  const trigram = diceCoefficient(a, b, 3);
+  const phon = phoneticMatchScore(a, b);
+  const mA = doubleMetaphonePrimary(a), mB = doubleMetaphonePrimary(b);
+
+  const orthoAvgLasa = (lev + jw + bigram) / 3;
+  const lasaComposite = 0.5 * orthoAvgLasa + 0.5 * phon;
+
+  const pocaOrtho = ((bigram + lev) / 2) * 100;
+  const pocaPhon = phon * 100;
+  const pocaScore = (pocaOrtho + pocaPhon) / 2;
+
+  let prefixLen = 0;
+  const aLow = a.toLowerCase(), bLow = b.toLowerCase();
+  for (let i = 0; i < Math.min(aLow.length, bLow.length); i++) {
+    if (aLow[i] !== bLow[i]) break;
+    prefixLen++;
+  }
+  let suffixLen = 0;
+  for (let i = 0; i < Math.min(aLow.length, bLow.length); i++) {
+    if (aLow[aLow.length - 1 - i] !== bLow[bLow.length - 1 - i]) break;
+    suffixLen++;
+  }
+
+  return {
+    lev, jw, bigram, trigram, phon, mA, mB,
+    lasaComposite, pocaOrtho, pocaPhon, pocaScore,
+    lenDiff: Math.abs(a.length - b.length),
+    prefixLen, suffixLen,
+  };
+}
+
+/* ---- Alignment traceback (for the ladder visualization) ---- */
+function alignPair(a, b) {
+  const n = a.length, m = b.length;
+  const D = Array.from({length: n + 1}, () => new Array(m + 1).fill(0));
+  for (let i = 0; i <= n; i++) D[i][0] = i;
+  for (let j = 0; j <= m; j++) D[0][j] = j;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      const cost = a[i-1].toLowerCase() === b[j-1].toLowerCase() ? 0 : 1;
+      D[i][j] = Math.min(D[i-1][j] + 1, D[i][j-1] + 1, D[i-1][j-1] + cost);
+    }
+  }
+  let i = n, j = m;
+  const out = [];
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1].toLowerCase() === b[j-1].toLowerCase() && D[i][j] === D[i-1][j-1]) {
+      out.push({ ca: a[i-1], cb: b[j-1], type: 'match' }); i--; j--;
+    } else if (i > 0 && j > 0 && D[i][j] === D[i-1][j-1] + 1) {
+      out.push({ ca: a[i-1], cb: b[j-1], type: 'sub' }); i--; j--;
+    } else if (i > 0 && D[i][j] === D[i-1][j] + 1) {
+      out.push({ ca: a[i-1], cb: '', type: 'gap' }); i--;
+    } else {
+      out.push({ ca: '', cb: b[j-1], type: 'gap' }); j--;
+    }
+  }
+  return out.reverse();
+}
+
+/* ========================= UI wiring ========================= */
+
+const drugAInput = document.getElementById('drugA');
+const drugBInput = document.getElementById('drugB');
+const emptyState = document.getElementById('emptyState');
+const results = document.getElementById('results');
+
+const PRESETS = [
+  ['hydroxyzine', 'hydralazine'],
+  ['Xarelto 15 mg', 'Xarelto 10 mg'],
+  ['nifedipine', 'manidipine'],
+  ['Losec', 'Lasix'],
+  ['predniSONE', 'prednisoLONE'],
+];
+
+const presetsEl = document.getElementById('presets');
+PRESETS.forEach(([a, b]) => {
+  const chip = document.createElement('button');
+  chip.className = 'chip';
+  chip.type = 'button';
+  chip.textContent = `${a} / ${b}`;
+  chip.addEventListener('click', () => {
+    drugAInput.value = a; drugBInput.value = b;
+    runCompare();
+  });
+  presetsEl.appendChild(chip);
+});
+
+document.getElementById('swapBtn').addEventListener('click', () => {
+  const tmp = drugAInput.value;
+  drugAInput.value = drugBInput.value;
+  drugBInput.value = tmp;
+  runCompare();
+});
+
+function describeArc(cx, cy, r, startAngle, endAngle) {
+  const polar = (angle) => {
+    const rad = (angle - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  };
+  const [sx, sy] = polar(endAngle);
+  const [ex, ey] = polar(startAngle);
+  const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+  return `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 0 ${ex} ${ey}`;
+}
+
+function drawGauge(svgEl, pct01, colorVar) {
+  // pct01: 0..1 progress. Arc spans 270deg (-135 to +135).
+  const cx = 42, cy = 42, r = 34;
+  const start = -135, end = 135;
+  const trackPath = describeArc(cx, cy, r, start, end);
+  const progEnd = start + (end - start) * pct01;
+  const progPath = describeArc(cx, cy, r, start, progEnd);
+  svgEl.innerHTML = `
+    <path d="${trackPath}" fill="none" stroke="var(--border)" stroke-width="7" stroke-linecap="round"/>
+    <path d="${progPath}" fill="none" stroke="${colorVar}" stroke-width="7" stroke-linecap="round"/>
+  `;
+}
+
+function bandVars(band) {
+  if (band === 'high') return ['var(--risk-high)', 'band-high'];
+  if (band === 'medium') return ['var(--risk-medium)', 'band-medium'];
+  return ['var(--risk-low)', 'band-low'];
+}
+
+function renderLadder(a, b) {
+  const aligned = alignPair(a, b);
+  const rowA = document.createElement('div');
+  rowA.className = 'ladder-row';
+  const rowSpine = document.createElement('div');
+  rowSpine.className = 'spine-row';
+  const rowB = document.createElement('div');
+  rowB.className = 'ladder-row';
+
+  aligned.forEach(({ca, cb, type}) => {
+    const cellA = document.createElement('span');
+    cellA.className = `cell ${type}`;
+    cellA.textContent = ca || '·';
+    rowA.appendChild(cellA);
+
+    const spine = document.createElement('span');
+    spine.className = `spine-cell ${type}`;
+    rowSpine.appendChild(spine);
+
+    const cellB = document.createElement('span');
+    cellB.className = `cell ${type}`;
+    cellB.textContent = cb || '·';
+    rowB.appendChild(cellB);
+  });
+
+  const ladder = document.getElementById('ladder');
+  ladder.innerHTML = '';
+  ladder.appendChild(rowA);
+  ladder.appendChild(rowSpine);
+  ladder.appendChild(rowB);
+}
+
+function renderLedger(m) {
+  const rows = [
+    ['Levenshtein distance', levenshteinDistance(drugAInput.value.trim(), drugBInput.value.trim())],
+    ['Levenshtein similarity', m.lev.toFixed(3)],
+    ['Jaro-Winkler similarity', m.jw.toFixed(3)],
+    ['Bigram Dice', m.bigram.toFixed(3)],
+    ['Trigram Dice', m.trigram.toFixed(3)],
+    ['Metaphone A / B', `${m.mA || '—'} / ${m.mB || '—'}`],
+    ['Phonetic match score', m.phon.toFixed(3)],
+    ['Length difference', m.lenDiff],
+    ['Shared prefix length', m.prefixLen],
+    ['Shared suffix length', m.suffixLen],
+  ];
+  const ledger = document.getElementById('ledger');
+  ledger.innerHTML = rows.map(([k, v]) => `
+    <div class="ledger-row"><span class="k">${k}</span><span class="v">${v}</span></div>
+  `).join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderTallManName(rendered) {
+  // Wrap contiguous uppercase runs in a colored span for emphasis.
+  let html = '';
+  let i = 0;
+  while (i < rendered.length) {
+    const c = rendered[i];
+    if (c >= 'A' && c <= 'Z') {
+      let j = i;
+      while (j < rendered.length && rendered[j] >= 'A' && rendered[j] <= 'Z') j++;
+      html += `<span class="cap">${escapeHtml(rendered.slice(i, j))}</span>`;
+      i = j;
+    } else {
+      html += escapeHtml(c);
+      i++;
+    }
+  }
+  return html;
+}
+
+function copyToClipboard(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1400);
+  });
+}
+
+function renderTallMan(a, b) {
+  const panel = document.getElementById('tallmanPanel');
+  const result = buildTallMan(a, b);
+
+  if (result.mode === 'identical') {
+    panel.innerHTML = `<p class="tallman-note"><strong>These names are identical.</strong> Tall-man lettering doesn't apply — but the same name appearing as two separate entries may itself be worth a look (duplicate catalog listing, or a different formulation/manufacturer worth distinguishing another way).</p>`;
+    return;
+  }
+  if (result.mode === 'numeric-only') {
+    panel.innerHTML = `<p class="tallman-note"><strong>These names differ only in numbers or formatting</strong> (e.g. strength), not letters — tall-man lettering relies on capitalization and won't create any visual distinction here. For strength-only confusion, consider bolding or enlarging the dose on labels/screens, separating strengths physically in storage, and an independent double-check at dispensing.</p>`;
+    return;
+  }
+  if (result.mode === 'too-dissimilar') {
+    panel.innerHTML = `<p class="tallman-note"><strong>These names share very little common structure.</strong> Capitalizing the differing portion would leave almost the whole word emphasized, which defeats the point of tall-man lettering. Other strategies — barcode scanning, physical/shelf separation, distinct packaging, or verbal spell-back confirmation — are likely more effective here than case emphasis.</p>`;
+    return;
+  }
+
+  const htmlA = renderTallManName(result.a);
+  const htmlB = renderTallManName(result.b);
+
+  panel.innerHTML = `
+    <div class="tallman-row">
+      <span class="tallman-name" id="tmA">${htmlA}</span>
+      <button class="copy-btn" id="copyA">Copy</button>
+    </div>
+    <div class="tallman-row">
+      <span class="tallman-name" id="tmB">${htmlB}</span>
+      <button class="copy-btn" id="copyB">Copy</button>
+    </div>
+    <div class="tallman-caveat">
+      Algorithmic suggestion based on letter-by-letter alignment — a reasonable starting point, not an
+      official designation. Cross-check against ISMP's published Tall Man Lettering list, and have new
+      suggestions reviewed by your pharmacy/P&amp;T committee before adopting them in clinical systems,
+      since shared conventions across institutions matter for pattern recognition.
+    </div>
+  `;
+  document.getElementById('copyA').addEventListener('click', (e) => copyToClipboard(result.a, e.target));
+  document.getElementById('copyB').addEventListener('click', (e) => copyToClipboard(result.b, e.target));
+}
+
+function runCompare() {
+  const a = drugAInput.value.trim();
+  const b = drugBInput.value.trim();
+
+  if (!a || !b) {
+    results.classList.remove('active');
+    emptyState.style.display = 'block';
+    return;
+  }
+  emptyState.style.display = 'none';
+  results.classList.add('active');
+
+  const m = computeAll(a, b);
+  const lasaBand = riskBand(m.lasaComposite);
+  const pocaHigh = m.pocaScore >= 70;
+
+  renderLadder(a, b);
+  renderTallMan(a, b);
+
+  document.getElementById('lasaNum').textContent = m.lasaComposite.toFixed(3);
+  const [lasaColor, lasaClass] = bandVars(lasaBand);
+  drawGauge(document.getElementById('gaugeLasa'), Math.min(m.lasaComposite, 1), lasaColor);
+  const lasaBandEl = document.getElementById('lasaBand');
+  lasaBandEl.textContent = lasaBand;
+  lasaBandEl.className = `band-chip ${lasaClass}`;
+
+  document.getElementById('pocaNum').textContent = m.pocaScore.toFixed(1);
+  const pocaBandKey = pocaHigh ? 'high' : (m.pocaScore >= 55 ? 'medium' : 'low');
+  const [pocaColor, pocaClass] = bandVars(pocaBandKey);
+  drawGauge(document.getElementById('gaugePoca'), Math.min(m.pocaScore / 100, 1), pocaColor);
+  const pocaBandEl = document.getElementById('pocaBand');
+  pocaBandEl.textContent = pocaHigh ? 'highly similar' : 'not highly similar';
+  pocaBandEl.className = `band-chip ${pocaClass}`;
+
+  renderLedger(m);
+}
+
+let debounceTimer;
+[drugAInput, drugBInput].forEach(el => {
+  el.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(runCompare, 180);
+  });
+});
+</script>
+</body>
+</html>
